@@ -67,8 +67,9 @@ Four modules, split by what they are allowed to touch:
   catalog/workload data, the run's *current* virtual time and its *currently published*
   forecast. Holds `Model` (zones, profiles, workloads, quotas) with the legality predicates
   `zone_ok` / `profile_ok` / `assert_legal`, `Usage` (live VM / vCPU / GPU-card counter with
-  `fits` and `over_quota`), `rank_options` + `pick` (carbon cost = PUE x mean forecast
-  intensity x active watts x work hours, chosen within feasibility `TIERS` 0.55 / 0.85 / 0.97
+  `fits` and `over_quota`), `rank_options` + `pick` (carbon cost = PUE x `buyable_ci`, the mean
+  of the cleanest forecast hours the plan fits into, x active watts x work hours, chosen within
+  feasibility `TIERS` 0.55 / 0.85 / 0.97
   of the window, near-ties within 3 % go to the smallest footprint), `decide_run` (run only in
   the cleanest `q` quantile of the forecast, `q` = needed time / time left x margin),
   `workers_needed` and `eff_rate` (the single multi-worker scaling assumption,

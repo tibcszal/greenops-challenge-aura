@@ -7,6 +7,7 @@ rules of the challenge easy to audit (see docs/RULES.md).
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -126,10 +127,26 @@ class Option:
     footprint: float  # tie-break: smaller VMs leave quota for the others
 
 
+def buyable_ci(series: list[float], lead_h: float, window_h: float, work_h: float) -> float | None:
+    """Mean intensity of the cheapest `work_h` hours still buyable in the window.
+
+    A plan that is paused during dirty hours never pays the window's mean, it
+    pays the cleanest hours it can fit into.  Ranking on that instead of the
+    flat mean also prefers the plan that is short enough to sit inside a dip.
+    Only the currently published forecast is read (docs/RULES.md).
+    """
+    win = series[int(lead_h): int(lead_h) + max(1, int(window_h))]
+    if not win:
+        return None
+    k = max(1, min(len(win), int(math.ceil(work_h))))
+    return sum(sorted(win)[:k]) / k
+
+
 def rank_options(m: Model, w: dict, now: datetime, completed: float, ci_mean: dict,
-                 exclude=()) -> list[Option]:
+                 exclude=(), series: dict | None = None) -> list[Option]:
     start = max(now, parse_ts(w["release_at"]))
     window_h = max((parse_ts(w["deadline_at"]) - start).total_seconds() / HOUR, 1e-6)
+    lead_h = max((start - now).total_seconds() / HOUR, 0.0)
     remaining = max(float(w["required_work"]) - completed, 0.0)
     over_h = (w["input_seconds"] + w["output_seconds"]) / HOUR
     out = []
@@ -137,7 +154,9 @@ def rank_options(m: Model, w: dict, now: datetime, completed: float, ci_mean: di
         z = m.zones[slug]
         work_h = remaining / rate_per_hour(p)
         ratio = (work_h + over_h + float(p["boot_seconds"]) / HOUR) / window_h
-        ci = ci_mean.get(z["electricity_area"], 1.0)
+        ci = buyable_ci(series.get(z["electricity_area"], []), lead_h, window_h, work_h) if series else None
+        if ci is None:
+            ci = ci_mean.get(z["electricity_area"], 1.0)
         cost = float(z["pue"]) * ci * float(p["active_watts"]) / 1000.0 * work_h
         fp = p["cpu_cores"] + 1000 * p["gpu_count"]
         out.append(Option(slug, p["id"], ratio, cost, fp))
