@@ -61,8 +61,13 @@ def main(argv=None):
     run_hash = hashlib.sha256(account["endpoint"].encode()).hexdigest()[:10]
     state = args.state or Path(os.environ.get("GREENOPS_STATE", f"/tmp/greenops-orch-{run_hash}.json"))
     env = CloudEnv(account, os.environ.get("GREENOPS_GRID_ENDPOINT"), os.environ.get("GREENOPS_GRID_SECRET"))
-    if not env.grid and not args.no_carbon:
-        print("warning: no grid credentials -> running without carbon awareness", file=sys.stderr)
+    if args.action == "run" and not env.grid and not args.no_carbon:
+        # A warning here is too quiet: the run still starts, burns its single 120 h window on an
+        # uncontrolled schedule, and the result looks like a regression of whatever was changed.
+        missing = [v for v in ("GREENOPS_GRID_ENDPOINT", "GREENOPS_GRID_SECRET") if not os.environ.get(v)]
+        raise SystemExit(f"no grid credentials ({', '.join(missing) or 'rejected by run-scope check'}): "
+                         "export this run's grid endpoint and secret, or pass --no-carbon to spend "
+                         "the run on the uncontrolled baseline on purpose.")
     env.warm()
     ctl = Controller(env, m, carbon_aware=bool(env.grid) and not args.no_carbon, margin=args.margin,
                      exclude=args.avoid_zones, state_path=state,
