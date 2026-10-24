@@ -44,7 +44,6 @@ PATH="$PWD/.venv/bin:$PATH" make test
 export GREENOPS_GRID_ENDPOINT='.../runs/<id>/grid/v4'
 export GREENOPS_GRID_SECRET='...'
 .venv/bin/python -m orchestrator.run run --config greenops-exo.json
-.venv/bin/python -m orchestrator.run run --no-carbon            # baseline for comparison
 .venv/bin/python -m orchestrator.run run --margin 1.6           # higher = pause less
 .venv/bin/python -m orchestrator.run cleanup --config greenops-exo.json   # delete leftovers after a crash
 

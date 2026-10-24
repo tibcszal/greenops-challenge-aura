@@ -13,8 +13,10 @@ export GREENOPS_GRID_SECRET='…'
 python -m orchestrator.run run --config greenops-exo.json
 python -m orchestrator.run cleanup --config greenops-exo.json   # delete leftovers after a crash
 python -m orchestrator.run plan                                  # offline: legal options per workload
-python -m orchestrator.run run --no-carbon                       # baseline for your comparison
 ```
+
+Both grid variables are required: `run` refuses to start without them rather than falling back
+to a carbon-blind schedule, so every run is scheduled on the same basis and stays comparable.
 
 ## Policy
 

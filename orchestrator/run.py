@@ -6,7 +6,8 @@
   python -m orchestrator.run cleanup --config greenops-exo.json
 
 Grid access (this run only): GREENOPS_GRID_ENDPOINT and GREENOPS_GRID_SECRET.
-Without them the controller still runs, but without carbon-aware pausing/zone choice.
+Both are required for `run`: a carbon-blind run is refused, so every run is scheduled
+on the same basis and runs stay comparable with each other.
 """
 from __future__ import annotations
 
@@ -47,7 +48,6 @@ def main(argv=None):
     ap.add_argument("--config", default=os.environ.get("GREENOPS_CONFIG", "greenops-exo.json"))
     ap.add_argument("--state", type=Path, help="receipt file (default /tmp/greenops-orch-<run>.json)")
     ap.add_argument("--margin", type=float, default=1.4, help="pause aggressiveness: higher = pause less")
-    ap.add_argument("--no-carbon", action="store_true", help="baseline: never pause, ignore forecasts")
     ap.add_argument("--avoid-zones", nargs="*", default=[], help="zone slugs never to use, e.g. fr-par-1")
     args = ap.parse_args(argv)
     m = load_model()
@@ -61,15 +61,15 @@ def main(argv=None):
     run_hash = hashlib.sha256(account["endpoint"].encode()).hexdigest()[:10]
     state = args.state or Path(os.environ.get("GREENOPS_STATE", f"/tmp/greenops-orch-{run_hash}.json"))
     env = CloudEnv(account, os.environ.get("GREENOPS_GRID_ENDPOINT"), os.environ.get("GREENOPS_GRID_SECRET"))
-    if args.action == "run" and not env.grid and not args.no_carbon:
-        # A warning here is too quiet: the run still starts, burns its single 120 h window on an
-        # uncontrolled schedule, and the result looks like a regression of whatever was changed.
+    if args.action == "run" and not env.grid:
+        # Never start a carbon-blind run.  A warning here is too quiet: the run still burns its
+        # single 120 h window on an uncontrolled schedule, and the result then looks like a
+        # regression of whatever was being tested.  Runs are comparable, so keep them all alike.
         missing = [v for v in ("GREENOPS_GRID_ENDPOINT", "GREENOPS_GRID_SECRET") if not os.environ.get(v)]
         raise SystemExit(f"no grid credentials ({', '.join(missing) or 'rejected by run-scope check'}): "
-                         "export this run's grid endpoint and secret, or pass --no-carbon to spend "
-                         "the run on the uncontrolled baseline on purpose.")
+                         "export this run's grid endpoint and secret before starting a run.")
     env.warm()
-    ctl = Controller(env, m, carbon_aware=bool(env.grid) and not args.no_carbon, margin=args.margin,
+    ctl = Controller(env, m, margin=args.margin,
                      exclude=args.avoid_zones, state_path=state,
                      log=lambda s: print(datetime.now(timezone.utc).strftime("%H:%M:%S"), s, flush=True))
     if args.action == "cleanup":

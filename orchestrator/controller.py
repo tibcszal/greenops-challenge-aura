@@ -31,6 +31,9 @@ NAME = re.compile(r"^orch-(?P<wid>w-[a-z0-9-]+?)-(?P<n>\d+)-p(?P<pid>\d+)$")
 
 
 class Controller:
+    # carbon_aware is not a run option: the CLI always schedules on the forecast and refuses to
+    # start without grid credentials.  It stays here only so the offline tests can measure the
+    # uncontrolled baseline the optimizer is supposed to beat.
     def __init__(self, env, model: Model, *, carbon_aware=True, margin=1.4,
                  exclude=(), state_path=None, log=print):
         self.env, self.m = env, model
