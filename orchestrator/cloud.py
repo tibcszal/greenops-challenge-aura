@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -27,6 +28,7 @@ class CloudEnv:
     def __init__(self, account: dict, grid_endpoint: str | None = None, grid_secret: str | None = None):
         self.account = account
         self.zones = static.discover(account)                 # slug -> zone API endpoint
+        self.status_timeout = float(os.environ.get("GREENOPS_STATUS_TIMEOUT", "4"))
         self._local, self._types, self._tmpl = threading.local(), {}, {}
         self._lock = threading.Lock()
         self.grid_secret = grid_secret
@@ -58,7 +60,11 @@ class CloudEnv:
             list(ex.map(one, self.zones))
 
     def status(self):
-        return work.status(self.account)
+        # The simulator stalls on a minority of status reads (measured: median 2.8 s, but
+        # roughly a quarter never answer).  At 720x a wall second is 12 virtual minutes, so the
+        # stock 10 s timeout spends 2 virtual hours per stall with the control loop blocked and
+        # nothing pausable.  Cut the loss: a stalled read is abandoned and retried next tick.
+        return work.status(self.account, timeout=self.status_timeout)
 
     def create(self, zone, profile, workload_id, name):
         c = self._c(zone)

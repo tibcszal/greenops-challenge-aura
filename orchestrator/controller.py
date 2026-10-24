@@ -325,6 +325,7 @@ def run_loop(ctl: Controller, poll=1.0, log=print):
     ctl.adopt()
     errors = 0
     while True:
+        started = time.monotonic()
         try:
             r = ctl.tick()
             if r == "done":
@@ -340,4 +341,8 @@ def run_loop(ctl: Controller, poll=1.0, log=print):
             log(f"tick failed ({errors}): {e!r}")
             if errors > 30:
                 raise
-        time.sleep(poll)
+        # Pace from the start of the attempt, not the end of it.  A slow or stalled call has
+        # already spent the interval (and 12 virtual minutes per wall second with it), so
+        # sleeping another full `poll` on top only widens the blind gap.  The subtraction still
+        # keeps a floor between attempts, so an instantly failing call cannot spin hot.
+        time.sleep(max(0.0, poll - (time.monotonic() - started)))

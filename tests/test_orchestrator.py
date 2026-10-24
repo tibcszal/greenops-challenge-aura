@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 
 from fake_env import FakeEnv                      # noqa: E402
+import orchestrator.controller as controller      # noqa: E402
 from orchestrator.controller import Controller    # noqa: E402
 from orchestrator.core import Illegal, Model, Usage, decide_run, quantile  # noqa: E402
 from orchestrator.run import grid_credentials   # noqa: E402
@@ -163,3 +164,40 @@ class GridCredentials(unittest.TestCase):
 
     def test_no_secret_anywhere_yields_nothing_to_run_with(self):
         self.assertEqual(self.resolve({}), (None, None))
+
+
+class LoopPacing(unittest.TestCase):
+    """At 720x a wall second is 12 virtual minutes, so idle wall time is lost control."""
+
+    def drive(self, tick_cost, outcome="wait", poll=1.0):
+        slept, clock = [], [0.0]
+
+        class Ctl:
+            def __init__(self):
+                self.n = 0
+
+            def adopt(self):
+                pass
+
+            def tick(self):
+                clock[0] += tick_cost
+                self.n += 1
+                if self.n >= 3:
+                    return "ended"
+                if outcome == "raise":
+                    raise RuntimeError("read timed out")
+                return outcome
+
+        with unittest.mock.patch.object(controller.time, "monotonic", lambda: clock[0]), \
+             unittest.mock.patch.object(controller.time, "sleep", slept.append):
+            controller.run_loop(Ctl(), poll=poll, log=lambda *_: None)
+        return slept
+
+    def test_a_slow_tick_does_not_also_pay_the_poll_interval(self):
+        self.assertEqual(self.drive(4.0), [0.0, 0.0])       # tick already outspent the interval
+
+    def test_a_fast_tick_still_keeps_the_cadence(self):
+        self.assertEqual(self.drive(0.25), [0.75, 0.75])
+
+    def test_an_instantly_failing_tick_cannot_spin_hot(self):
+        self.assertEqual(self.drive(0.0, outcome="raise"), [1.0, 1.0])
