@@ -5,8 +5,11 @@
   python -m orchestrator.run run --config greenops-exo.json
   python -m orchestrator.run cleanup --config greenops-exo.json
 
-Grid access (this run only): GREENOPS_GRID_ENDPOINT and GREENOPS_GRID_SECRET.
-Without them the controller still runs, but without carbon-aware pausing/zone choice.
+Grid access (this run only): put the run's grid secret in greenops-grid.json next to the
+cloud config, as {"secret": "..."}, or pass GREENOPS_GRID_SECRET. The grid endpoint is
+derived from the cloud endpoint unless GREENOPS_GRID_ENDPOINT overrides it. A run without
+working grid access is refused, so every run is scheduled on the same basis and stays
+comparable with the others.
 """
 from __future__ import annotations
 
@@ -29,6 +32,28 @@ def load_model() -> Model:
                  json.loads((ROOT / "challenge/workloads.json").read_text()))
 
 
+def grid_credentials(account: dict, config_path) -> tuple[str | None, str | None]:
+    """This run's grid endpoint and secret.
+
+    Environment first, because that is how a judging container receives them, then JSON next to
+    the cloud config: `greenops-grid.json` ({"secret": ...}) or a `grid_secret` field in
+    `greenops-exo.json` itself.  The endpoint is never required input: CloudEnv only accepts the
+    cloud endpoint's own run prefix plus /grid/v4, so it is derived whenever it is not given.
+    """
+    endpoint = os.environ.get("GREENOPS_GRID_ENDPOINT")
+    secret = os.environ.get("GREENOPS_GRID_SECRET")
+    if not (endpoint and secret):
+        blob = {}
+        path = Path(config_path).with_name("greenops-grid.json")
+        if path.exists():
+            blob = json.loads(path.read_text())
+        endpoint = endpoint or blob.get("endpoint") or account.get("grid_endpoint")
+        secret = secret or blob.get("secret") or account.get("grid_secret")
+    if secret and not endpoint:
+        endpoint = account["endpoint"].split("/cloud/")[0] + "/grid/v4"
+    return endpoint, secret
+
+
 def cmd_plan(m: Model, args):
     """Offline view with flat electricity: shows the legal choices the controller has."""
     now = parse_ts("2025-09-30T00:00:00Z")
@@ -49,7 +74,6 @@ def main(argv=None):
     ap.add_argument("--margin", type=float, default=MARGIN, help="pause aggressiveness: higher = pause less")
     ap.add_argument("--no-park", action="store_true",
                     help="never delete-and-restart checkpointed jobs during dirty hours (stop them instead)")
-    ap.add_argument("--no-carbon", action="store_true", help="baseline: never pause, ignore forecasts")
     ap.add_argument("--avoid-zones", nargs="*", default=[], help="zone slugs never to use, e.g. fr-par-1")
     args = ap.parse_args(argv)
     m = load_model()
@@ -62,12 +86,24 @@ def main(argv=None):
     account = static.read_account(args.config)
     run_hash = hashlib.sha256(account["endpoint"].encode()).hexdigest()[:10]
     state = args.state or Path(os.environ.get("GREENOPS_STATE", f"/tmp/greenops-orch-{run_hash}.json"))
-    env = CloudEnv(account, os.environ.get("GREENOPS_GRID_ENDPOINT"), os.environ.get("GREENOPS_GRID_SECRET"))
-    if not env.grid and not args.no_carbon:
-        print("warning: no grid credentials -> running without carbon awareness", file=sys.stderr)
+    env = CloudEnv(account, *grid_credentials(account, args.config))
+    if args.action == "run" and not env.grid:
+        # Never start a carbon-blind run.  A warning here is too quiet: the run still burns its
+        # single 120 h window on an uncontrolled schedule, and the result then looks like a
+        # regression of whatever was being tested.  Runs are comparable, so keep them all alike.
+        raise SystemExit("no grid secret for this run: put it in greenops-grid.json as "
+                         '{"secret": "..."}, or as a grid_secret field of the cloud config, or '
+                         "in GREENOPS_GRID_SECRET. The endpoint is derived from the cloud one.")
+    if args.action == "run":
+        # Credentials being present is not the same as them working: forecast() swallows a 401
+        # and returns None, which would leave the series empty and the schedule carbon-blind.
+        # Probe once here, while the clock is still frozen, instead of finding out at the end.
+        area = sorted({z["electricity_area"] for z in m.zones.values()})[0]
+        if not env.forecast(area):
+            raise SystemExit(f"grid endpoint returned no forecast for {area}: check "
+                             "GREENOPS_GRID_SECRET and that the endpoint belongs to this run.")
     env.warm()
-    ctl = Controller(env, m, carbon_aware=bool(env.grid) and not args.no_carbon, margin=args.margin,
-                     park=not args.no_park,
+    ctl = Controller(env, m, margin=args.margin, park=not args.no_park,
                      exclude=args.avoid_zones, state_path=state,
                      log=lambda s: print(datetime.now(timezone.utc).strftime("%H:%M:%S"), s, flush=True))
     if args.action == "cleanup":

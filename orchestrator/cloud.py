@@ -6,7 +6,9 @@ origin and run prefix as the cloud endpoint (same check as examples/python/grid.
 from __future__ import annotations
 
 import base64
+import inspect
 import json
+import os
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -22,11 +24,17 @@ import work     # noqa: E402  signed work-status call with 429 backoff
 
 from .core import parse_ts   # noqa: E402
 
+# Whether the starter's work.status that actually loaded accepts a read timeout.  An older
+# helper (the one baked into the starter image) does not, and calling it with the keyword
+# would raise TypeError on every tick until the error budget aborts the run.
+_STATUS_TAKES_TIMEOUT = "timeout" in inspect.signature(work.status).parameters
+
 
 class CloudEnv:
     def __init__(self, account: dict, grid_endpoint: str | None = None, grid_secret: str | None = None):
         self.account = account
         self.zones = static.discover(account)                 # slug -> zone API endpoint
+        self.status_timeout = float(os.environ.get("GREENOPS_STATUS_TIMEOUT", "4"))
         self._local, self._types, self._tmpl = threading.local(), {}, {}
         self._lock = threading.Lock()
         self.grid_secret = grid_secret
@@ -58,6 +66,16 @@ class CloudEnv:
             list(ex.map(one, self.zones))
 
     def status(self):
+        # The simulator stalls on a minority of status reads (measured: median 2.8 s, but
+        # roughly a quarter never answer).  At 720x a wall second is 12 virtual minutes, so the
+        # stock 10 s timeout spends 2 virtual hours per stall with the control loop blocked and
+        # nothing pausable.  Cut the loss: a stalled read is abandoned and retried next tick.
+        #
+        # The helper is resolved at runtime and is NOT ours in the submission image, which layers
+        # orchestrator/ onto the starter image and keeps that image's examples/python.  Never
+        # assume our signature is the one that loaded.
+        if _STATUS_TAKES_TIMEOUT:
+            return work.status(self.account, timeout=self.status_timeout)
         return work.status(self.account)
 
     def create(self, zone, profile, workload_id, name):

@@ -46,6 +46,9 @@ NAME = re.compile(r"^orch-(?P<wid>w-[a-z0-9-]+?)-(?P<n>\d+)-p(?P<pid>\d+)$")
 
 
 class Controller:
+    # carbon_aware is not a run option: the CLI always schedules on the forecast and refuses to
+    # start without grid credentials.  It stays here only so the offline tests can measure the
+    # uncontrolled baseline the optimizer is supposed to beat.
     def __init__(self, env, model: Model, *, carbon_aware=True, margin=MARGIN, park=True,
                  exclude=(), state_path=None, log=print):
         self.env, self.m = env, model
@@ -390,6 +393,7 @@ def run_loop(ctl: Controller, poll=0.5, log=print):
     ctl.adopt()
     errors = 0
     while True:
+        started = time.monotonic()
         try:
             r = ctl.tick()
             if r == "done":
@@ -405,4 +409,8 @@ def run_loop(ctl: Controller, poll=0.5, log=print):
             log(f"tick failed ({errors}): {e!r}")
             if errors > 30:
                 raise
-        time.sleep(poll)
+        # Pace from the start of the attempt, not the end of it.  A slow or stalled call has
+        # already spent the interval (and 12 virtual minutes per wall second with it), so
+        # sleeping another full `poll` on top only widens the blind gap.  The subtraction still
+        # keeps a floor between attempts, so an instantly failing call cannot spin hot.
+        time.sleep(max(0.0, poll - (time.monotonic() - started)))

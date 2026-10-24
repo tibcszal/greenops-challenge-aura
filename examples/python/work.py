@@ -10,7 +10,7 @@ import requests
 from static import check_endpoint, client, discover, save
 
 
-def status(account):
+def status(account, timeout=10):
     check_endpoint(account["endpoint"])
     endpoint = account["endpoint"].removesuffix("/cloud/v2") + "/work/v1/status"
     expires = str(int(time.time()) + 60)
@@ -19,7 +19,7 @@ def status(account):
         "\n".join(["GET " + path, "", "", "", expires]).encode(), hashlib.sha256).digest()).decode()
     response = requests.get(endpoint, headers={"Authorization":
         f'EXO2-HMAC-SHA256 credential={account["key"]},expires={expires},signature={signature}'},
-        timeout=10, allow_redirects=False)
+        timeout=timeout, allow_redirects=False)
     if response.status_code == 429:
         time.sleep(min(10, max(1, int(response.headers.get("Retry-After", "1")))))
         return None

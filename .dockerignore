@@ -7,4 +7,6 @@
 **/*.tfvars
 .env*
 greenops-exo*.json
+greenops-grid*.json
+greenops*.env
 credentials*.json

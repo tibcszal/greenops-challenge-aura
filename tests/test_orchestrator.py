@@ -1,6 +1,10 @@
+import inspect
 import json
+import os
 import sys
+import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -8,8 +12,10 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 
 from fake_env import FakeEnv                      # noqa: E402
+import orchestrator.controller as controller      # noqa: E402
 from orchestrator.controller import Controller    # noqa: E402
 from orchestrator.core import Illegal, Model, Usage, decide_run, dirty_run_h, excess, quantile  # noqa: E402
+from orchestrator.run import grid_credentials   # noqa: E402
 
 CATALOG = json.loads((ROOT / "challenge/catalog.json").read_text())
 WORKLOADS = json.loads((ROOT / "challenge/workloads.json").read_text())
@@ -150,3 +156,108 @@ class QuotaFallback(unittest.TestCase):
         u.vcpus = 280                                 # 40 vCPU free: a mega fits
         o = pick(opts, m, u)
         self.assertEqual(m.profiles[o.pid]["size"], "mega")
+
+
+class GridCredentials(unittest.TestCase):
+    ACCOUNT = {"endpoint": "https://host/runs/abc123/cloud/v2"}
+    GRID = "https://host/runs/abc123/grid/v4"
+
+    def resolve(self, env, files=()):
+        with tempfile.TemporaryDirectory() as d:
+            for name, blob in files:
+                (Path(d) / name).write_text(json.dumps(blob))
+            with unittest.mock.patch.dict(os.environ, env, clear=True):
+                return grid_credentials(dict(self.ACCOUNT), str(Path(d) / "greenops-exo.json"))
+
+    def test_environment_wins_and_is_what_judging_passes(self):
+        self.assertEqual(self.resolve({"GREENOPS_GRID_ENDPOINT": "https://host/runs/abc123/grid/v4",
+                                       "GREENOPS_GRID_SECRET": "from-env"}),
+                         (self.GRID, "from-env"))
+
+    def test_secret_from_json_file_and_endpoint_derived(self):
+        self.assertEqual(self.resolve({}, [("greenops-grid.json", {"secret": "from-file"})]),
+                         (self.GRID, "from-file"))
+
+    def test_secret_field_on_the_cloud_config(self):
+        # Always resolve inside a temp dir: a relative path would pick up a real
+        # greenops-grid.json from the working directory and leak its secret into the diff.
+        with tempfile.TemporaryDirectory() as d:
+            acct = dict(self.ACCOUNT, grid_secret="inline")
+            with unittest.mock.patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(grid_credentials(acct, str(Path(d) / "greenops-exo.json")),
+                                 (self.GRID, "inline"))
+
+    def test_no_secret_anywhere_yields_nothing_to_run_with(self):
+        self.assertEqual(self.resolve({}), (None, None))
+
+
+class StatusHelperCompatibility(unittest.TestCase):
+    """The submission image keeps the STARTER image's examples/python, not ours.
+
+    So work.status may be the older one that takes no timeout. Calling it with the keyword
+    raises TypeError on every tick until the error budget aborts the run, which is exactly
+    what happened live. CloudEnv.status must work against either signature.
+    """
+
+    def call_status(self, helper):
+        import orchestrator.cloud as cloud
+        env = cloud.CloudEnv.__new__(cloud.CloudEnv)      # no network, no discovery
+        env.account = {"endpoint": "https://host/runs/x/cloud/v2"}
+        env.status_timeout = 4.0
+        takes = "timeout" in inspect.signature(helper).parameters
+        with unittest.mock.patch.object(cloud.work, "status", helper), \
+             unittest.mock.patch.object(cloud, "_STATUS_TAKES_TIMEOUT", takes):
+            return cloud.CloudEnv.status(env)
+
+    def test_modern_helper_receives_the_shortened_timeout(self):
+        seen = {}
+
+        def helper(account, timeout=10):
+            seen["timeout"] = timeout
+            return {"state": "RUNNING"}
+
+        self.assertEqual(self.call_status(helper), {"state": "RUNNING"})
+        self.assertEqual(seen["timeout"], 4.0)
+
+    def test_starter_image_helper_without_timeout_still_works(self):
+        def helper(account):                               # the base image's signature
+            return {"state": "RUNNING"}
+
+        self.assertEqual(self.call_status(helper), {"state": "RUNNING"})
+
+
+class LoopPacing(unittest.TestCase):
+    """At 720x a wall second is 12 virtual minutes, so idle wall time is lost control."""
+
+    def drive(self, tick_cost, outcome="wait", poll=1.0):
+        slept, clock = [], [0.0]
+
+        class Ctl:
+            def __init__(self):
+                self.n = 0
+
+            def adopt(self):
+                pass
+
+            def tick(self):
+                clock[0] += tick_cost
+                self.n += 1
+                if self.n >= 3:
+                    return "ended"
+                if outcome == "raise":
+                    raise RuntimeError("read timed out")
+                return outcome
+
+        with unittest.mock.patch.object(controller.time, "monotonic", lambda: clock[0]), \
+             unittest.mock.patch.object(controller.time, "sleep", slept.append):
+            controller.run_loop(Ctl(), poll=poll, log=lambda *_: None)
+        return slept
+
+    def test_a_slow_tick_does_not_also_pay_the_poll_interval(self):
+        self.assertEqual(self.drive(4.0), [0.0, 0.0])       # tick already outspent the interval
+
+    def test_a_fast_tick_still_keeps_the_cadence(self):
+        self.assertEqual(self.drive(0.25), [0.75, 0.75])
+
+    def test_an_instantly_failing_tick_cannot_spin_hot(self):
+        self.assertEqual(self.drive(0.0, outcome="raise"), [1.0, 1.0])
