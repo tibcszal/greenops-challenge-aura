@@ -6,6 +6,7 @@ origin and run prefix as the cloud endpoint (same check as examples/python/grid.
 from __future__ import annotations
 
 import base64
+import inspect
 import json
 import os
 import sys
@@ -22,6 +23,11 @@ import static   # noqa: E402  starter helpers: endpoint checks, discovery, signe
 import work     # noqa: E402  signed work-status call with 429 backoff
 
 from .core import parse_ts   # noqa: E402
+
+# Whether the starter's work.status that actually loaded accepts a read timeout.  An older
+# helper (the one baked into the starter image) does not, and calling it with the keyword
+# would raise TypeError on every tick until the error budget aborts the run.
+_STATUS_TAKES_TIMEOUT = "timeout" in inspect.signature(work.status).parameters
 
 
 class CloudEnv:
@@ -64,7 +70,13 @@ class CloudEnv:
         # roughly a quarter never answer).  At 720x a wall second is 12 virtual minutes, so the
         # stock 10 s timeout spends 2 virtual hours per stall with the control loop blocked and
         # nothing pausable.  Cut the loss: a stalled read is abandoned and retried next tick.
-        return work.status(self.account, timeout=self.status_timeout)
+        #
+        # The helper is resolved at runtime and is NOT ours in the submission image, which layers
+        # orchestrator/ onto the starter image and keeps that image's examples/python.  Never
+        # assume our signature is the one that loaded.
+        if _STATUS_TAKES_TIMEOUT:
+            return work.status(self.account, timeout=self.status_timeout)
+        return work.status(self.account)
 
     def create(self, zone, profile, workload_id, name):
         c = self._c(zone)

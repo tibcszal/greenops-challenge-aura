@@ -1,3 +1,4 @@
+import inspect
 import json
 import os
 import sys
@@ -164,6 +165,41 @@ class GridCredentials(unittest.TestCase):
 
     def test_no_secret_anywhere_yields_nothing_to_run_with(self):
         self.assertEqual(self.resolve({}), (None, None))
+
+
+class StatusHelperCompatibility(unittest.TestCase):
+    """The submission image keeps the STARTER image's examples/python, not ours.
+
+    So work.status may be the older one that takes no timeout. Calling it with the keyword
+    raises TypeError on every tick until the error budget aborts the run, which is exactly
+    what happened live. CloudEnv.status must work against either signature.
+    """
+
+    def call_status(self, helper):
+        import orchestrator.cloud as cloud
+        env = cloud.CloudEnv.__new__(cloud.CloudEnv)      # no network, no discovery
+        env.account = {"endpoint": "https://host/runs/x/cloud/v2"}
+        env.status_timeout = 4.0
+        takes = "timeout" in inspect.signature(helper).parameters
+        with unittest.mock.patch.object(cloud.work, "status", helper), \
+             unittest.mock.patch.object(cloud, "_STATUS_TAKES_TIMEOUT", takes):
+            return cloud.CloudEnv.status(env)
+
+    def test_modern_helper_receives_the_shortened_timeout(self):
+        seen = {}
+
+        def helper(account, timeout=10):
+            seen["timeout"] = timeout
+            return {"state": "RUNNING"}
+
+        self.assertEqual(self.call_status(helper), {"state": "RUNNING"})
+        self.assertEqual(seen["timeout"], 4.0)
+
+    def test_starter_image_helper_without_timeout_still_works(self):
+        def helper(account):                               # the base image's signature
+            return {"state": "RUNNING"}
+
+        self.assertEqual(self.call_status(helper), {"state": "RUNNING"})
 
 
 class LoopPacing(unittest.TestCase):

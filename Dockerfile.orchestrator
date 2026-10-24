@@ -1,5 +1,10 @@
 # Submission image: starter toolchain + the orchestrator. Pin the base digest when you submit.
 FROM ghcr.io/exogmi/greenops-challenge-starter-kit:latest
+# The orchestrator imports examples/python at runtime and reads challenge/ for its model, so
+# ship the copies it was tested against. Inheriting the base image's copies silently decides
+# the run on different data and different helper signatures than any local test exercises.
+COPY examples/python /opt/greenops-starter/examples/python
+COPY challenge /opt/greenops-starter/challenge
 COPY orchestrator /opt/greenops-starter/orchestrator
 WORKDIR /opt/greenops-starter
 ENV GREENOPS_STATE=/tmp/greenops-orch.json
