@@ -31,11 +31,9 @@ That keeps every run scheduled on the same basis, so runs stay comparable with e
 
 1. **Legality first**: every placement is checked against country allow/deny lists, EU/CH/DACH
    residency, allowed profiles/families and GPU memory, twice (ranking and right before `create`).
-2. **Placement**: cheapest legal (zone, profile) = PUE x buyable intensity x energy of the
-   remaining work, where buyable intensity is the mean of the cleanest forecast hours the plan
-   can actually fit into, not the window's flat mean (a plan that is paused during dirty hours
-   never pays the mean, and a shorter plan fits inside a deeper dip); prefers plans that use
-   <=55 % of the window (room to pause), smallest VM on near-ties (<=3 %), because quota is shared.
+2. **Placement**: cheapest legal (zone, profile) = PUE x mean forecast intensity x energy of the
+   remaining work; prefers plans that use <=55 % of the window (room to pause), smallest VM on
+   near-ties (<=3 %), because quota is shared.
 3. **Timing**: a VM runs in the cleanest `q` share of the next 24 h, `q` = needed time / time left
    x margin. Stopped VMs draw no power but keep quota, so pausing is switched off while
    unadmitted workloads would not fit into the quotas ("pressure"). Little slack => run non-stop,

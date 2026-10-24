@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 from fake_env import FakeEnv                      # noqa: E402
 from orchestrator.controller import Controller    # noqa: E402
-from orchestrator.core import Illegal, Model, Usage, buyable_ci, decide_run, quantile  # noqa: E402
+from orchestrator.core import Illegal, Model, Usage, decide_run, quantile  # noqa: E402
 from orchestrator.run import grid_credentials   # noqa: E402
 
 CATALOG = json.loads((ROOT / "challenge/catalog.json").read_text())
@@ -89,13 +89,6 @@ class PolicyTests(unittest.TestCase):
 
     def test_quantile(self):
         self.assertAlmostEqual(quantile([1, 2, 3, 4], 0.5), 2.5)
-
-    def test_buyable_ci_prices_the_cleanest_hours_a_plan_can_fit_into(self):
-        series = [100.0, 200.0, 300.0, 400.0]
-        self.assertAlmostEqual(buyable_ci(series, 0, 4, 2), 150.0)     # two cheapest hours
-        self.assertAlmostEqual(buyable_ci(series, 0, 4, 4), 250.0)     # a plan filling the window pays the mean
-        self.assertAlmostEqual(buyable_ci(series, 2, 2, 1), 300.0)     # released later: the dip is already gone
-        self.assertIsNone(buyable_ci([], 0, 4, 1))
 
 
 class EndToEnd(unittest.TestCase):

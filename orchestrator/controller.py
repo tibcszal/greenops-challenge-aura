@@ -175,7 +175,7 @@ class Controller:
             rate = eff_rate(p, len(vms), float(w["sync_overhead"]))
             zone = vms[0]["zone"]
         else:
-            opts = rank_options(self.m, w, now, completed, self.ci_mean, self.exclude, self.series)
+            opts = rank_options(self.m, w, now, completed, self.ci_mean, self.exclude)
             plan = pick(opts)
             if plan is None:
                 return {"laxity": -1e9, "plan": None}
@@ -232,7 +232,7 @@ class Controller:
     def _create(self, w, plan_opt, now):
         wid = w["id"]
         usage = self._with_reservations(wid, now)
-        opts = rank_options(self.m, w, now, 0.0, self.ci_mean, self.exclude, self.series)
+        opts = rank_options(self.m, w, now, 0.0, self.ci_mean, self.exclude)
         o = pick(opts, self.m, usage)
         if o is None:
             return                              # wait for quota
@@ -251,7 +251,7 @@ class Controller:
                 continue
             if (parse_ts(wo["release_at"]) - now).total_seconds() >= RESERVE_H * HOUR:
                 continue
-            opts = rank_options(self.m, wo, now, 0.0, self.ci_mean, self.exclude, self.series)
+            opts = rank_options(self.m, wo, now, 0.0, self.ci_mean, self.exclude)
             tight = int(wo["max_workers"]) == 1 and min(o.ratio for o in opts) > 0.4
             if a["laxity"] < mine or tight:
                 o = min_footprint(opts)
