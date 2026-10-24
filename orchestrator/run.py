@@ -68,6 +68,14 @@ def main(argv=None):
         missing = [v for v in ("GREENOPS_GRID_ENDPOINT", "GREENOPS_GRID_SECRET") if not os.environ.get(v)]
         raise SystemExit(f"no grid credentials ({', '.join(missing) or 'rejected by run-scope check'}): "
                          "export this run's grid endpoint and secret before starting a run.")
+    if args.action == "run":
+        # Credentials being present is not the same as them working: forecast() swallows a 401
+        # and returns None, which would leave the series empty and the schedule carbon-blind.
+        # Probe once here, while the clock is still frozen, instead of finding out at the end.
+        area = sorted({z["electricity_area"] for z in m.zones.values()})[0]
+        if not env.forecast(area):
+            raise SystemExit(f"grid endpoint returned no forecast for {area}: check "
+                             "GREENOPS_GRID_SECRET and that the endpoint belongs to this run.")
     env.warm()
     ctl = Controller(env, m, margin=args.margin,
                      exclude=args.avoid_zones, state_path=state,
