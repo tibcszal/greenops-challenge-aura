@@ -7,16 +7,25 @@ Controls all 15 workloads of the GreenOps challenge.  Code: `core.py` (pure deci
 
 ## Run (inside the starter container, fresh run credentials in `greenops-exo.json`)
 
+Put this run's grid secret next to the cloud config, as `greenops-grid.json`:
+
+```json
+{"secret": "… from \"API credentials\" of THIS run …"}
+```
+
 ```sh
-export GREENOPS_GRID_ENDPOINT='…/runs/<id>/grid/v4'   # from "API credentials" of THIS run
-export GREENOPS_GRID_SECRET='…'
 python -m orchestrator.run run --config greenops-exo.json
 python -m orchestrator.run cleanup --config greenops-exo.json   # delete leftovers after a crash
 python -m orchestrator.run plan                                  # offline: legal options per workload
 ```
 
-Both grid variables are required: `run` refuses to start without them rather than falling back
-to a carbon-blind schedule, so every run is scheduled on the same basis and stays comparable.
+The grid endpoint is not input: it must be the cloud endpoint's own run prefix plus `/grid/v4`,
+so it is derived. `GREENOPS_GRID_SECRET` and `GREENOPS_GRID_ENDPOINT` still win when set, which
+is how a judging container passes them, and a `grid_secret` field in the cloud config also works.
+
+Grid access is mandatory: `run` refuses to start when the secret is missing, and refuses again if
+a probe fetch comes back empty, rather than silently falling back to a carbon-blind schedule.
+That keeps every run scheduled on the same basis, so runs stay comparable with each other.
 
 ## Policy
 

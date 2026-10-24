@@ -6,6 +6,7 @@ __pycache__/
 .env.*
 !.env.example
 greenops-exo*.json
+greenops-grid*.json
 credentials*.json
 *.tfstate*
 .terraform/

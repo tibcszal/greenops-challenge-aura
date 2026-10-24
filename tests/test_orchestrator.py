@@ -1,6 +1,9 @@
 import json
+import os
 import sys
+import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -10,6 +13,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 from fake_env import FakeEnv                      # noqa: E402
 from orchestrator.controller import Controller    # noqa: E402
 from orchestrator.core import Illegal, Model, Usage, buyable_ci, decide_run, quantile  # noqa: E402
+from orchestrator.run import grid_credentials   # noqa: E402
 
 CATALOG = json.loads((ROOT / "challenge/catalog.json").read_text())
 WORKLOADS = json.loads((ROOT / "challenge/workloads.json").read_text())
@@ -133,3 +137,36 @@ class QuotaFallback(unittest.TestCase):
         u.vcpus = 280                                 # 40 vCPU free: a mega fits
         o = pick(opts, m, u)
         self.assertEqual(m.profiles[o.pid]["size"], "mega")
+
+
+class GridCredentials(unittest.TestCase):
+    ACCOUNT = {"endpoint": "https://host/runs/abc123/cloud/v2"}
+    GRID = "https://host/runs/abc123/grid/v4"
+
+    def resolve(self, env, files=()):
+        with tempfile.TemporaryDirectory() as d:
+            for name, blob in files:
+                (Path(d) / name).write_text(json.dumps(blob))
+            with unittest.mock.patch.dict(os.environ, env, clear=True):
+                return grid_credentials(dict(self.ACCOUNT), str(Path(d) / "greenops-exo.json"))
+
+    def test_environment_wins_and_is_what_judging_passes(self):
+        self.assertEqual(self.resolve({"GREENOPS_GRID_ENDPOINT": "https://host/runs/abc123/grid/v4",
+                                       "GREENOPS_GRID_SECRET": "from-env"}),
+                         (self.GRID, "from-env"))
+
+    def test_secret_from_json_file_and_endpoint_derived(self):
+        self.assertEqual(self.resolve({}, [("greenops-grid.json", {"secret": "from-file"})]),
+                         (self.GRID, "from-file"))
+
+    def test_secret_field_on_the_cloud_config(self):
+        # Always resolve inside a temp dir: a relative path would pick up a real
+        # greenops-grid.json from the working directory and leak its secret into the diff.
+        with tempfile.TemporaryDirectory() as d:
+            acct = dict(self.ACCOUNT, grid_secret="inline")
+            with unittest.mock.patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(grid_credentials(acct, str(Path(d) / "greenops-exo.json")),
+                                 (self.GRID, "inline"))
+
+    def test_no_secret_anywhere_yields_nothing_to_run_with(self):
+        self.assertEqual(self.resolve({}), (None, None))

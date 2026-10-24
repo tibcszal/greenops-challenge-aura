@@ -40,9 +40,8 @@ PATH="$PWD/.venv/bin:$PATH" make test
 .venv/bin/python -m orchestrator.run plan
 .venv/bin/python -m orchestrator.run plan --avoid-zones fr-par-1
 
-# Orchestrator, live (needs greenops-exo.json plus this run's grid env vars)
-export GREENOPS_GRID_ENDPOINT='.../runs/<id>/grid/v4'
-export GREENOPS_GRID_SECRET='...'
+# Orchestrator, live (needs greenops-exo.json plus greenops-grid.json: {"secret": "..."};
+# the grid endpoint is derived from the cloud one, GREENOPS_GRID_SECRET/_ENDPOINT override)
 .venv/bin/python -m orchestrator.run run --config greenops-exo.json
 .venv/bin/python -m orchestrator.run run --margin 1.6           # higher = pause less
 .venv/bin/python -m orchestrator.run cleanup --config greenops-exo.json   # delete leftovers after a crash
