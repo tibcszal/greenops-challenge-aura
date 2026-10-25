@@ -1,82 +1,101 @@
-# GreenOps Challenge starter
+# GreenOps Challenge Solution
 
-Build a program that chooses when and where cloud workloads run, and reduce their
-electricity emissions. **Your code runs on your computer and controls our simulator through
-APIs. The website shows its progress and results.**
+We have built a program that chooses when and where cloud workloads run, and it reduces their electricity emissions. Code runs on our computer, controls EXOSCALE simulator through provided APIs.
 
-Start with this demo: it schedules one CPU workload and one GPU workload. Then
-extend it to schedule all 15 workloads within 120 simulated hours.
+Our first simulation consumed ~36 kg CO2e and we could, in the end, get it down to 21.9 kg CO2e. This repo contains the source code for the orchestrator.
 
-## 1. Download your credentials
+In order to run the code, follow these steps:
+
+## 1. Download credentials
 
 Sign in at [greenops.containerstack.net](https://greenops.containerstack.net),
 create or join a team, then click **New simulation run**.
 
-Open that run’s **API credentials → Download CLI config** to download
-`greenops-exo-<run-id>.json`. The ID is the first 10 characters of your run.
-Python, Go and Terraform examples all use this file.
-Keep it private; it contains your run’s access keys.
+Open that run’s **API credentials → Other credentials and advanced setup → Download environment file** to download
+`greenops-<run-id>.env`.
 
-## 2. Get the starter
+## 2. Obtain the code
 
 You need Git and Docker installed on your computer.
 
 ```sh
-git clone https://github.com/exogmi/greenops-challenge-starter-kit.git
-cd greenops-challenge-starter-kit
+git clone https://github.com/tibcszal/greenops-challenge-aura.git
+cd greenops-challenge-aura
 ```
 
-Move the downloaded JSON file into this folder and rename it to
-`greenops-exo.json`. It is ignored by Git.
+Move the downloaded .env file into this folder and rename it to
+`greenops.env`. It is ignored by Git.
 
-## 3. Open the development environment
-
-Run this in the starter folder:
+## 3. Setup your environment
 
 ```sh
-docker run --rm -it -v "$PWD:/workspace" \
-  ghcr.io/exogmi/greenops-challenge-starter-kit:latest
+python3 -m venv .venv && .venv/bin/pip install --require-hashes -r requirements.txt
+make env
 ```
 
-This opens a terminal inside a container with Python, Go and Terraform ready to use.
-Your checkout is mounted at `/workspace`; edits on your computer appear there.
-
-## 4. Run the demo
-
-Inside the container, run:
+## 4. Test (optional)
 
 ```sh
-python examples/python/static.py run --config greenops-exo.json
+PATH="$PWD/.venv/bin:$PATH" make test
 ```
 
-Keep that terminal open and open your run’s dashboard in the website. You should
-see one CPU VM and one GPU VM, followed by workload progress. The clock starts
-when the first VM is created. The example deletes its VMs after their outputs
-are delivered. It schedules **two of the 15 workloads**.
+Preview what the orchestrator would place, offline and without credentials:
 
-Prefer another tool? Use the same setup and choose the
-[Go or Terraform example](docs/EXAMPLES.md) on a fresh run.
+```sh
+.venv/bin/python -m orchestrator.run plan
+```
 
-## 5. Build your solution
+## 5. Run the orchestrator
 
-Start by editing `examples/python/static.py` or `examples/go-static/`. The demo’s
-fixed placements are in `examples/static-plan.json`; all 15 workload requirements
-are in `challenge/workloads.json`.
+Credentials are read from `greenops.env` in this folder (`make env` shows which
+file is picked). Pick one way to run, locally or in Docker. Keep that terminal
+open and watch your run's dashboard on the website.
 
-First schedule all workloads and meet their deadlines. Then use electricity
-forecasts to improve when and where they run. Read the
-[cloud, work-status and electricity API reference](docs/API.md) as you need it.
+Run only one orchestrator per run. Never start the local and the Docker version
+against the same run at the same time.
 
-For each new attempt, create a fresh run and download its credentials. Python and
-Terraform state belongs to one run: use a fresh checkout or
-[separate receipt/state files](docs/DEVELOPMENT.md#start-another-attempt).
+### Locally
 
-Use only observations and forecasts published by the run you control, and respect
-each workload’s allowed locations. Read the [competition rules](docs/RULES.md)
-before building your optimizer. Submit your GitHub repository and reproducible
-run instructions through the website when you have a result to submit.
+```sh
+make run
+```
 
-[Native installation and troubleshooting](docs/DEVELOPMENT.md) ·
+Useful variations:
+
+```sh
+make run ARGS="--margin 1.6"      # higher margin = pauses less
+```
+
+### In Docker
+
+Docker commands need `sudo` on some machines; the Makefile uses `sudo docker`
+by default (override with `make DOCKER=docker ...`).
+
+```sh
+make docker-build                 # builds greenops-orchestrator:local
+make docker-run                   # live run, mounts greenops.env and .local/state
+make docker-run ARGS="--margin 1.6"
+```
+
+The same without `make`:
+
+```sh
+mkdir -p .local/state
+sudo docker run --rm -it \
+  -v "$PWD/greenops.env:/opt/greenops-starter/greenops.env:ro" \
+  -v "$PWD/.local/state:/state" -e GREENOPS_STATE=/state/orch.json \
+  greenops-orchestrator:local
+```
+
+Credentials are never baked into the image; they are mounted read-only at run time.
+
+## 6. Clean up after a crash
+
+If a run stops unexpectedly, delete the leftover VMs:
+
+```sh
+make cleanup                      # local
+make docker-cleanup               # Docker
+```
+
 [Verification](docs/VERIFICATION.md) · [Third-party software](docs/THIRD_PARTY.md)
-
-Platform trouble? [Report a technical problem](mailto:greenops.challenge@exoscale.ch).
