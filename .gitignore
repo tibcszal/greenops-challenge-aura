@@ -13,3 +13,4 @@ credentials*.json
 *.tfplan
 greenops*.env
 run*.log
+.claude/*
